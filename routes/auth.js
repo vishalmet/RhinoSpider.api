@@ -1,58 +1,50 @@
 const express = require('express');
 const router = express.Router();
-const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 
-// Validate Email Route
+// Validate Email Route with timeout handling
 router.post('/validate-email', async (req, res) => {
   try {
     const { email } = req.body;
 
-    // Check if email is valid format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ error: 'Invalid email format' });
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required',
+      });
     }
 
-    // Check if email already exists
-    const existingUser = await User.findOne({ email });
+    // Add timeout to database operation
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Database timeout')), 9000)
+    );
+
+    const emailCheckPromise = User.findOne({ email });
+
+    // Race between timeout and database query
+    const existingUser = await Promise.race([
+      emailCheckPromise,
+      timeoutPromise
+    ]);
+
     if (existingUser) {
-      return res.status(400).json({ error: 'Email already registered' });
+      return res.status(400).json({
+        success: false,
+        message: 'Email already exists'
+      });
     }
 
-    res.json({ message: 'Email is valid and available' });
-  } catch (error) {
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// Signup Route
-router.post('/signup', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    // Check if user already exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ error: 'Email already registered' });
-    }
-
-    // Hash password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    // Create new user
-    const user = new User({
-      email,
-      password: hashedPassword
+    return res.status(200).json({
+      success: true,
+      message: 'Email is available'
     });
 
-    await user.save();
-
-    res.status(201).json({ message: 'User created successfully' });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Server error' });
+    console.error('Email validation error:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Server error during validation'
+    });
   }
 });
 
